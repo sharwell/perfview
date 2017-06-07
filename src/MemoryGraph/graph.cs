@@ -428,7 +428,7 @@ namespace Graphs
         {
             RootIndex = NodeIndex.Invalid;
             if (m_writer == null)
-                m_writer = new MemoryStreamWriter(m_expectedNodeCount * 8);
+                m_writer = new MemoryMappedFileStreamWriter(m_expectedNodeCount * 8);
 
             m_totalSize = 0;
             m_totalRefs = 0;
@@ -540,7 +540,7 @@ namespace Graphs
             // Read in the Blob stream.  
             // TODO be lazy about reading in the blobs.  
             int blobCount = deserializer.ReadInt();
-            MemoryStreamWriter writer = new MemoryStreamWriter(blobCount);
+            MemoryMappedFileStreamWriter writer = new MemoryMappedFileStreamWriter(blobCount);
             for (int i = 0; i < blobCount; i++)
                 writer.Write(deserializer.ReadByte());
             m_reader = writer.GetReader();
@@ -593,12 +593,12 @@ namespace Graphs
         internal GrowableArray<TypeInfo> m_types;       // We expect only thousands of these
         internal GrowableArray<DeferedTypeInfo> m_deferedTypes; // Types that we only have IDs and module image bases.  
         internal GrowableArray<StreamLabel> m_nodes;    // We expect millions of these.  points at a serialize node in m_reader
-        internal MemoryStreamReader m_reader;           // This is the actual data for the nodes.  Can be large 
+        internal MemoryMappedFileStreamReader m_reader; // This is the actual data for the nodes.  Can be large 
         internal StreamLabel m_undefinedObjDef;         // a node of nodeId 'Unknown'.   New nodes start out pointing to this 
         // and then can be set to another nodeId (needed when there are cycles).  
         // There should not be any of these left as long as every node referenced
         // by another node has a definition.
-        internal MemoryStreamWriter m_writer;           // Used only during construction to serialize the nodes.  
+        internal MemoryMappedFileStreamWriter m_writer; // Used only during construction to serialize the nodes.  
         #endregion
     }
 
@@ -708,10 +708,10 @@ namespace Graphs
         public override string ToString()
         {
             StringWriter sw = new StringWriter();
-            WriteXml(sw);
+            WriteXml(sw, includeChildren: false);
             return sw.ToString();
         }
-        public virtual void WriteXml(TextWriter writer, string prefix = "", NodeType typeStorage = null, string additinalAttribs = "")
+        public virtual void WriteXml(TextWriter writer, bool includeChildren = true, string prefix = "", NodeType typeStorage = null, string additinalAttribs = "")
         {
             Debug.Assert(this.Index != NodeIndex.Invalid);
             if (typeStorage == null)
@@ -730,20 +730,28 @@ namespace Graphs
             if (childIndex != NodeIndex.Invalid)
             {
                 writer.WriteLine(">");
-                writer.Write(prefix);
-                int i = 0;
-                do
+                if (includeChildren)
                 {
-                    writer.Write(" {0}", childIndex);
-                    childIndex = this.GetNextChildIndex();
-                    i++;
-                    if (i >= 32)
+                    writer.Write(prefix);
+                    int i = 0;
+                    do
                     {
-                        writer.WriteLine();
-                        writer.Write(prefix);
-                        i = 0;
-                    }
-                } while (childIndex != NodeIndex.Invalid);
+                        writer.Write(" {0}", childIndex);
+                        childIndex = this.GetNextChildIndex();
+                        i++;
+                        if (i >= 32)
+                        {
+                            writer.WriteLine();
+                            writer.Write(prefix);
+                            i = 0;
+                        }
+                    } while (childIndex != NodeIndex.Invalid);
+                }
+                else
+                {
+                    writer.Write(prefix);
+                    writer.WriteLine($"<!-- {ChildCount} children omitted... -->");
+                }
                 writer.WriteLine(" </Node>");
             }
             else
@@ -759,7 +767,7 @@ namespace Graphs
         }
 
         // Node information is stored in a compressed form because we have alot of them. 
-        internal static int ReadCompressedInt(MemoryStreamReader reader)
+        internal static int ReadCompressedInt(MemoryMappedFileStreamReader reader)
         {
             int ret = 0;
             byte b = reader.ReadByte();
@@ -779,7 +787,7 @@ namespace Graphs
                 ret += (b & 0x7f);
             }
         }
-        internal static void WriteCompressedInt(MemoryStreamWriter writer, int value)
+        internal static void WriteCompressedInt(MemoryMappedFileStreamWriter writer, int value)
         {
             if (value << 25 >> 25 == value)
                 goto oneByte;
@@ -1028,7 +1036,7 @@ namespace Graphs
             foreach (var nodeIndex in nodes)
             {
                 node = graph.GetNode(nodeIndex, node);
-                node.WriteXml(sw, "  ", type1);
+                node.WriteXml(sw, prefix: "  ", typeStorage: type1);
             }
             sw.WriteLine("<NodeList>");
             return sw.ToString();
@@ -1064,7 +1072,7 @@ namespace Graphs
             for (NodeIndex nodeIndex = 0; nodeIndex < graph.NodeIndexLimit; nodeIndex++)
             {
                 var node = graph.GetNode(nodeIndex, nodeStorage);
-                node.WriteXml(writer, "  ");
+                node.WriteXml(writer, prefix: "  ");
             }
             writer.WriteLine(" </Nodes>");
             writer.WriteLine("</MemoryGraph>");
@@ -1564,17 +1572,17 @@ public class SpanningTree
         for (int i = 0; i < m_parent.Length; i++)
             m_parent[i] = NodeIndex.Invalid;
 
-        float[] nodePriorities = new float[m_parent.Length];
+        double[] nodePriorities = new double[m_parent.Length];
         bool scanedForOrphans = false;
         var epsilon = 1E-7F;            // Something that is big enough not to bet lost in roundoff error.  
-        float order = 0;
+        double order = 0;
         for (int i = 0; ; i++)
         {
             if ((i & 0x1FFF) == 0)  // Every 8K
                 System.Threading.Thread.Sleep(0);       // Allow interruption.  
 
             NodeIndex nodeIndex;
-            float nodePriority;
+            double nodePriority;
             if (nodesToVisit.Count == 0)
             {
                 nodePriority = 0;
@@ -1743,11 +1751,11 @@ public class SpanningTree
     private void SetTypePriorities(string priorityPats)
     {
         if (m_typePriorities == null)
-            m_typePriorities = new float[(int)m_graph.NodeTypeIndexLimit];
+            m_typePriorities = new double[(int)m_graph.NodeTypeIndexLimit];
 
         string[] priorityPatArray = priorityPats.Split(';');
         Regex[] priorityRegExArray = new Regex[priorityPatArray.Length];
-        float[] priorityArray = new float[priorityPatArray.Length];
+        double[] priorityArray = new double[priorityPatArray.Length];
         for (int i = 0; i < priorityPatArray.Length; i++)
         {
             var m = Regex.Match(priorityPatArray[i], @"(.*)->(-?\d+.?\d*)");
@@ -1760,7 +1768,7 @@ public class SpanningTree
 
             var dotNetRegEx = ToDotNetRegEx(m.Groups[1].Value.Trim());
             priorityRegExArray[i] = new Regex(dotNetRegEx, RegexOptions.IgnoreCase);
-            priorityArray[i] = float.Parse(m.Groups[2].Value);
+            priorityArray[i] = double.Parse(m.Groups[2].Value);
         }
 
         // Assign every type index a priority in m_typePriorities based on if they match a pattern.  
@@ -1792,7 +1800,7 @@ public class SpanningTree
 
     // We give each type a priority (using the m_priority Regular expressions) which guide the breadth-first scan. 
     string m_priorityRegExs;
-    float[] m_typePriorities;
+    double[] m_typePriorities;
 
     NodeType m_typeStorage;
     Node m_nodeStorage;                 // Only for things that can't be reentrant
@@ -1813,7 +1821,7 @@ class PriorityQueue
         m_heap = new DataItem[initialSize];
     }
     public int Count { get { return m_count; } }
-    public void Enqueue(NodeIndex item, float priority)
+    public void Enqueue(NodeIndex item, double priority)
     {
         var idx = m_count;
         if (idx >= m_heap.Length)
@@ -1842,7 +1850,7 @@ class PriorityQueue
         }
         // CheckInvariant();
     }
-    public NodeIndex Dequeue(out float priority)
+    public NodeIndex Dequeue(out double priority)
     {
         Debug.Assert(Count > 0);
 
@@ -1898,8 +1906,8 @@ class PriorityQueue
 
     private struct DataItem
     {
-        public DataItem(NodeIndex value, float priority) { this.value = value; this.priority = priority; }
-        public float priority;
+        public DataItem(NodeIndex value, double priority) { this.value = value; this.priority = priority; }
+        public double priority;
         public NodeIndex value;
     }
     [Conditional("DEBUG")]
@@ -1939,7 +1947,7 @@ public class GraphSampler
         m_graph = graph;
         m_log = log;
         m_targetNodeCount = targetNodeCount;
-        m_filteringRatio = (float)graph.NodeCount / targetNodeCount;
+        m_filteringRatio = (double)graph.NodeCount / targetNodeCount;
         m_nodeStorage = m_graph.AllocNodeStorage();
         m_childNodeStorage = m_graph.AllocNodeStorage();
         m_nodeTypeStorage = m_graph.AllocTypeNodeStorage();
@@ -2098,19 +2106,19 @@ public class GraphSampler
     /// the returned graph returned by GetSampledGraph.   If the sampled count for that type multiplied
     /// by this scaling factor, you end up with the count for that type of the original unsampled graph.  
     /// </summary>
-    public float[] CountScalingByType
+    public double[] CountScalingByType
     {
         get
         {
-            var ret = new float[m_newGraph.NodeTypeCount];
+            var ret = new double[m_newGraph.NodeTypeCount];
             for (int i = 0; i < m_statsByType.Length; i++)
             {
                 var newTypeIndex = MapTypeIndex((NodeTypeIndex)i);
                 if (newTypeIndex != NodeTypeIndex.Invalid)
                 {
-                    float scale = 1;
+                    double scale = 1;
                     if (m_statsByType[i].SampleMetric != 0)
-                        scale = (float)((double)m_statsByType[i].TotalMetric / m_statsByType[i].SampleMetric);
+                        scale = (double)m_statsByType[i].TotalMetric / m_statsByType[i].SampleMetric;
                     ret[(int)newTypeIndex] = scale;
                 }
             }
@@ -2302,7 +2310,7 @@ public class GraphSampler
             statsCheckByType[(int)node.TypeIndex] = stats;
         }
 
-        float[] scalings = null;
+        double[] scalings = null;
         if (completed)
             scalings = CountScalingByType;
 
@@ -2387,7 +2395,7 @@ public class GraphSampler
     Node m_childNodeStorage;
     NodeType m_nodeTypeStorage;
 
-    float m_filteringRatio;
+    double m_filteringRatio;
     SampleStats[] m_statsByType;
     int m_numDistictTypesWithSamples;
     int m_numDistictTypes;

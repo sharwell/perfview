@@ -14,7 +14,8 @@ namespace System.Collections.Generic
     /// an int which represents the logical charCount. It is a struct to avoid an extra pointer dereference, so this
     /// is really meant to be embedded in other structures.
     /// </summary>
-#if GROWABLEARRAY_PUBLIC 
+    [DebuggerDisplay("Count = {Count}")]
+#if GROWABLEARRAY_PUBLIC
     public 
 #endif
     struct GrowableArray<T>
@@ -365,18 +366,18 @@ namespace System.Collections.Generic
 #if TESTING
    public static void TestGrowableArray()
     {
-        GrowableArray<float> testArray = new GrowableArray<float>();
-        for (float i = 1.1F; i < 10; i += 2)
+        GrowableArray<double> testArray = new GrowableArray<double>();
+        for (double i = 1.1; i < 10; i += 2)
         {
             int successes = TestBinarySearch(testArray);
             Debug.Assert(successes == ((int)i) / 2);
             testArray.Add(i);
         }
 
-        for (float i = 0.1F; i < 11; i += 2)
+        for (double i = 0.1; i < 11; i += 2)
         {
             int index;
-            bool result = testArray.BinarySearch(i, out index, delegate(float key, float elem) { return (int)key - (int)elem; });
+            bool result = testArray.BinarySearch(i, out index, delegate(double key, double elem) { return (int)key - (int)elem; });
             Debug.Assert(!result);
             testArray.InsertAt(index + 1, i);
         }
@@ -384,10 +385,10 @@ namespace System.Collections.Generic
         int lastSuccesses = TestBinarySearch(testArray);
         Debug.Assert(lastSuccesses == 11);
 
-        for (float i = 0; i < 11; i += 1)
+        for (double i = 0; i < 11; i += 1)
         {
             int index;
-            bool result = testArray.BinarySearch(i, out index, delegate(float key, float elem) { return (int)key - (int)elem; });
+            bool result = testArray.BinarySearch(i, out index, delegate(double key, double elem) { return (int)key - (int)elem; });
             Debug.Assert(result);
             testArray.InsertAt(index + 1, i);
         }
@@ -396,22 +397,22 @@ namespace System.Collections.Generic
         Debug.Assert(lastSuccesses == 11);
 
         // We always get the last one when the equality comparision allows multiple items to match.  
-        for (float i = 0; i < 11; i += 1)
+        for (double i = 0; i < 11; i += 1)
         {
             int index;
-            bool result = testArray.BinarySearch(i, out index, delegate(float key, float elem) { return (int)key - (int)elem; });
+            bool result = testArray.BinarySearch(i, out index, delegate(double key, double elem) { return (int)key - (int)elem; });
             Debug.Assert(result);
             Debug.Assert(i == testArray[index]);
         }
         Console.WriteLine("Done");
     }
-    private static int TestBinarySearch(GrowableArray<float> testArray)
+    private static int TestBinarySearch(GrowableArray<double> testArray)
     {
         int successes = 0;
         for (int i = 0; i < 30; i++)
         {
             int index;
-            if (testArray.BinarySearch(i, out index, delegate(float key, float elem) { return (int)key - (int)elem; }))
+            if (testArray.BinarySearch(i, out index, delegate(double key, double elem) { return (int)key - (int)elem; }))
             {
                 successes++;
                 Debug.Assert((int)testArray[index] == i);

@@ -63,7 +63,7 @@ namespace Triggers
         /// <param name="decayToZeroHours">If nonzero, the threshold will decay to 0 in this amount of time.</param>
         /// <param name="log">A place to write messages.</param>
         /// <param name="onTriggered">A delegate to call when the threshold is exceeded</param>
-        public PerformanceCounterTrigger(string spec, float decayToZeroHours, TextWriter log, Action<PerformanceCounterTrigger> onTriggered)
+        public PerformanceCounterTrigger(string spec, double decayToZeroHours, TextWriter log, Action<PerformanceCounterTrigger> onTriggered)
         {
             m_spec = spec;
             m_log = log;
@@ -83,7 +83,7 @@ namespace Triggers
             var threashold = m.Groups[5].Value;
 
             IsGreaterThan = (op == ">");
-            Threshold = float.Parse(threashold);
+            Threshold = double.Parse(threashold);
             try { m_category = new PerformanceCounterCategory(categoryName); }
             catch (Exception) { throw new ApplicationException("Could not start performance counter " + m_spec); }
 
@@ -151,7 +151,7 @@ namespace Triggers
         /// <summary>
         /// The threshold number that got passed in the spec in the constructor.   This never changes over time.   
         /// </summary>
-        public float Threshold { get; private set; }
+        public double Threshold { get; private set; }
         /// <summary>
         /// Returns true if the perf counter must be great than the threshold to trigger.  
         /// </summary>
@@ -159,7 +159,7 @@ namespace Triggers
         /// <summary>
         /// The value of DecayToZeroHours parameter passed to the constructor of the trigger. 
         /// </summary>
-        public float DecayToZeroHours { get; set; }
+        public double DecayToZeroHours { get; set; }
         /// <summary>
         /// The amount of time in seconds that the performance counter needs to be above the threshold to be considered triggered
         /// This allows you to ignore transients.   By default the value is 3 seconds.   
@@ -170,20 +170,20 @@ namespace Triggers
         /// If DecayToZeroHours is set, the threshold changes over time.  This property returns the value after
         /// being adjusted by DecayToZeroHours. 
         /// </summary>
-        public float EffectiveThreshold
+        public double EffectiveThreshold
         {
             get
             {
                 var threshold = Threshold;
                 if (DecayToZeroHours != 0)
-                    threshold = (float)(threshold * (1 - (DateTime.UtcNow - m_startTimeUtc).TotalHours / DecayToZeroHours));
+                    threshold = threshold * (1 - (DateTime.UtcNow - m_startTimeUtc).TotalHours / DecayToZeroHours);
                 return threshold;
             }
         }
         /// <summary>
         /// This is the value of the performance counter since the last tie 'Update()' was called.  
         /// </summary>
-        public float CurrentValue { get; private set; }
+        public double CurrentValue { get; private set; }
 
         public override void Dispose()
         {
@@ -261,7 +261,7 @@ namespace Triggers
         /// <summary>
         /// Update 'CurrentValue' to the live value of the performance counter. 
         /// </summary>
-        private float Update()
+        private double Update()
         {
             CurrentValue = 0;
             m_instanceExists = m_category.InstanceExists(m_counter.InstanceName);
@@ -350,7 +350,7 @@ namespace Triggers
         /// <summary>
         /// Triggers if an .NET GC takes longer than triggerDurationMSec
         /// </summary>
-        public static ETWEventTrigger GCTooLong(int triggerDurationMSec, float decayToZeroHours, string processFilter, TextWriter log, Action<ETWEventTrigger> onTriggered)
+        public static ETWEventTrigger GCTooLong(int triggerDurationMSec, double decayToZeroHours, string processFilter, TextWriter log, Action<ETWEventTrigger> onTriggered)
         {
             var ret = new ETWEventTrigger(log);
             ret.TriggerMSec = triggerDurationMSec;
@@ -381,7 +381,7 @@ namespace Triggers
             return ret;
         }
 
-        public static ETWEventTrigger BgcFinalPauseTooLong(int triggerDurationMSec, float decayToZeroHours, string processFilter, TextWriter log, Action<ETWEventTrigger> onTriggered)
+        public static ETWEventTrigger BgcFinalPauseTooLong(int triggerDurationMSec, double decayToZeroHours, string processFilter, TextWriter log, Action<ETWEventTrigger> onTriggered)
         {
             var ret = new ETWEventTrigger(log);
             ret.TriggerMSec = triggerDurationMSec;
@@ -444,7 +444,7 @@ namespace Triggers
         /// <summary>
         /// Triggers if AppFabric Cache service takes longer than triggerDurationMSec
         /// </summary>
-        public static ETWEventTrigger AppFabricTooLong(int triggerDurationMSec, float decayToZeroHours, string processFilter, TextWriter log, Action<ETWEventTrigger> onTriggered)
+        public static ETWEventTrigger AppFabricTooLong(int triggerDurationMSec, double decayToZeroHours, string processFilter, TextWriter log, Action<ETWEventTrigger> onTriggered)
         {
             var ret = new ETWEventTrigger(log);
             ret.TriggerMSec = triggerDurationMSec;
@@ -1341,7 +1341,7 @@ namespace Triggers
         {
             try
             {
-                float value = m_counter.NextValue();
+                double value = m_counter.NextValue();
                 PerfViewLogger.Log.PerformanceCounterUpdate(m_spec, value);
             }
             catch (InvalidOperationException e)
