@@ -106,6 +106,7 @@
     <Compile Include="Stacks\AggregateStackSource.cs" />
     <Compile Include="Stacks\FilterStacks.cs" />
     <Compile Include="Stacks\IndexMap.cs" />
+    <Compile Include="Stacks\Interner.cs" />
     <Compile Include="Symbols\SymbolReader.cs" />
     <Compile Include="DynamicTraceEventParser.cs" />
     <Compile Include="ETWTraceEventSource.cs" />
