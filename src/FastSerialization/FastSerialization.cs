@@ -1041,7 +1041,7 @@ namespace FastSerialization
 #endif
             reader.Read(buffer, offset, length);
 #if DEBUG
-            Log("<ReadByte Value=\"" + ret.ToString() + "\" StreamLabel=\"0x" + label.ToString("x") + "\"/>");
+            Log("<ReadByte Value=\"" + "[...]" + "\" StreamLabel=\"0x" + label.ToString("x") + "\"/>");
 #endif
         }
 
