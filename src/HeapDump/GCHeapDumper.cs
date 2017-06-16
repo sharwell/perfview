@@ -28,6 +28,8 @@ using System.Threading;
 using Address = System.UInt64;
 using Microsoft.Diagnostics.Utilities;
 using Microsoft.Diagnostics.HeapDump;
+using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 #if CROSS_GENERATION_LIVENESS
 using Microsoft.Diagnostics.CrossGenerationLiveness;
 #endif
@@ -1675,11 +1677,32 @@ public class GCHeapDumper
     /// </summary>
     private void DumpAllSegments()
     {
+        var internedStringAddresses = new HashSet<Address>();
+        var internedStrings = new ConcurrentDictionary<string, int>();
+        Func<string, int, int> valueUpdater = (value, count) => count + 1;
+
         var segments = m_dotNetHeap.Segments;
         m_log.WriteLine("Dumping {0} GC segments in the heap in bulk.", segments.Count);
         var segmentCount = 0;
         foreach (var segment in segments)
         {
+            long stringsSaved = 0;
+            long charsSaved = 0;
+            long bytesSaved = 0;
+            foreach (var pair in internedStrings)
+            {
+                stringsSaved += pair.Value - 1;
+                charsSaved += (pair.Value - 1) * (pair.Key.Length + 1);
+
+                int lengthBytes = (pair.Key.Length + 1) * sizeof(char);
+                if ((lengthBytes & 0x3) != 0)
+                    lengthBytes = (lengthBytes + 0x4) & ~0x3;
+
+                bytesSaved += (pair.Value - 1) * (RuntimeHelpers.OffsetToStringData + lengthBytes);
+            }
+
+            m_log.WriteLine($"Saved {stringsSaved} string instances totalling {charsSaved} chars ({bytesSaved} bytes) by interning.");
+
             var start = segment.Start;
             var end = segment.End;
             m_log.WriteLine("[{0,5:f1}s: Dumping segment {1} of {2} start: {3:x} len: {4:f2}M]", m_sw.Elapsed.TotalSeconds,
@@ -1721,6 +1744,54 @@ public class GCHeapDumper
                 {
                     m_children.Add(m_gcHeapDump.MemoryGraph.GetNodeIndex(childObj));
                 });
+
+                bool isDeclaredSymbolInfoArray = type.IsArray && type.Name == "Microsoft.CodeAnalysis.FindSymbols.DeclaredSymbolInfo[]";
+                if (isDeclaredSymbolInfoArray)
+                {
+                    int length = type.GetArrayLength(objAddr);
+                    var containerDisplayNameField = type.ComponentType.GetFieldByName("<ContainerDisplayName>k__BackingField");
+                    var fullyQualifiedContainerNameField = type.ComponentType.GetFieldByName("<FullyQualifiedContainerName>k__BackingField");
+                    var nameField = type.ComponentType.GetFieldByName("<Name>k__BackingField");
+                    var inheritanceNamesField = type.ComponentType.GetFieldByName("<InheritanceNames>k__BackingField");
+                    for (int i = 0; i < length; i++)
+                    {
+                        var element = type.GetArrayElementAddress(objAddr, i);
+                        var string1 = (string)containerDisplayNameField.GetValue(element, true, true);
+                        if (string1 != null && internedStringAddresses.Add((Address)containerDisplayNameField.GetValue(element, true, false)))
+                            internedStrings.AddOrUpdate(string1, 1, valueUpdater);
+
+                        var string2 = (string)fullyQualifiedContainerNameField.GetValue(element, true, true);
+                        if (string2 != null && internedStringAddresses.Add((Address)fullyQualifiedContainerNameField.GetValue(element, true, false)))
+                            internedStrings.AddOrUpdate(string2, 1, valueUpdater);
+
+                        var string3 = (string)nameField.GetValue(element, true, true);
+                        if (string3 != null && internedStringAddresses.Add((Address)nameField.GetValue(element, true, false)))
+                            internedStrings.AddOrUpdate(string3, 1, valueUpdater);
+
+                        var arrayRefAddr = inheritanceNamesField.GetAddress(element, true);
+                        Address arrayAddr;
+                        if (!m_dotNetHeap.ReadPointer(arrayRefAddr, out arrayAddr) || arrayAddr == 0)
+                            continue;
+
+                        var arrayType = m_dotNetHeap.GetObjectType(arrayAddr);
+                        if (arrayType == null || !arrayType.IsArray || !arrayType.ComponentType.IsString)
+                            continue;
+
+                        var stringType = arrayType.ComponentType;
+                        int inheritanceNamesLength = arrayType.GetArrayLength(arrayAddr);
+                        for (int j = 0; j < inheritanceNamesLength; j++)
+                        {
+                            var stringRefAddr = arrayType.GetArrayElementAddress(arrayAddr, j);
+                            Address stringAddr;
+                            if (!m_dotNetHeap.ReadPointer(stringRefAddr, out stringAddr) || !internedStringAddresses.Add(stringAddr))
+                                continue;
+
+                            var string4 = (string)arrayType.GetArrayElementValue(arrayAddr, j);
+                            if (string4 != null)
+                                internedStrings.AddOrUpdate(string4, 1, valueUpdater);
+                        }
+                    }
+                }
 
                 var objNodeIdx = m_gcHeapDump.MemoryGraph.GetNodeIndex(objAddr);
                 ulong objSize = type.GetSize(objAddr);
