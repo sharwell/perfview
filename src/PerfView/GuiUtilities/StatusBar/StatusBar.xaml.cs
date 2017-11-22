@@ -366,21 +366,6 @@ namespace PerfView
         }
 
         /// <summary>
-        /// In the case where the work has no completion action other than updating status, this routine
-        /// can do all the work (startWord, do work endWork)
-        /// </summary>
-        public void DoWork(string message, Action work)
-        {
-            StartWork(message, delegate()
-            {
-                work();
-                EndWork(delegate()
-                {
-                    Status = "Complete: " + message;
-                });
-            });
-        }
-        /// <summary>
         /// returns true if we have started work and have not completed it. 
         /// </summary>
         public bool IsWorking { get { return m_work != null; } }
